@@ -1,0 +1,263 @@
+/*
+ * LiquidBounce Hacked Client
+ * A free open source mixin-based injection hacked client for Minecraft using Minecraft Forge.
+ * https://github.com/CCBlueX/LiquidBounce/
+ */
+package net.ccbluex.liquidbounce
+
+
+import kotlinx.coroutines.*
+import net.ccbluex.liquidbounce.api.loadSettings
+import net.ccbluex.liquidbounce.api.messageOfTheDay
+import net.ccbluex.liquidbounce.cape.CapeService
+import net.ccbluex.liquidbounce.event.ClientShutdownEvent
+import net.ccbluex.liquidbounce.event.EventManager
+import net.ccbluex.liquidbounce.event.EventManager.callEvent
+import net.ccbluex.liquidbounce.event.EventManager.registerListener
+import net.ccbluex.liquidbounce.event.StartupEvent
+import net.ccbluex.liquidbounce.features.command.CommandManager
+import net.ccbluex.liquidbounce.features.command.CommandManager.registerCommands
+import net.ccbluex.liquidbounce.features.module.ModuleManager
+import net.ccbluex.liquidbounce.features.module.ModuleManager.registerModules
+import net.ccbluex.liquidbounce.features.module.modules.world.scaffolds.Tower
+import net.ccbluex.liquidbounce.features.special.BungeeCordSpoof
+import net.ccbluex.liquidbounce.features.special.ClientFixes
+import net.ccbluex.liquidbounce.file.FileManager
+import net.ccbluex.liquidbounce.file.FileManager.loadAllConfigs
+import net.ccbluex.liquidbounce.file.FileManager.saveAllConfigs
+import net.ccbluex.liquidbounce.lang.LanguageManager.loadLanguages
+import net.ccbluex.liquidbounce.script.ScriptManager
+import net.ccbluex.liquidbounce.script.ScriptManager.enableScripts
+import net.ccbluex.liquidbounce.script.ScriptManager.loadScripts
+import net.ccbluex.liquidbounce.script.remapper.Remapper
+import net.ccbluex.liquidbounce.script.remapper.Remapper.loadSrg
+import net.ccbluex.liquidbounce.tabs.BlocksTab
+import net.ccbluex.liquidbounce.tabs.ExploitsTab
+import net.ccbluex.liquidbounce.tabs.HeadsTab
+import net.ccbluex.liquidbounce.ui.client.GuiClientConfiguration.Companion.updateClientWindow
+import net.ccbluex.liquidbounce.ui.client.altmanager.GuiAltManager.Companion.loadActiveGenerators
+import net.ccbluex.liquidbounce.ui.client.clickgui.ClickGui
+import net.ccbluex.liquidbounce.ui.client.hud.HUD
+import net.ccbluex.liquidbounce.ui.font.Fonts.loadFonts
+import net.ccbluex.liquidbounce.utils.*
+import net.ccbluex.liquidbounce.utils.ClassUtils.hasForge
+import net.ccbluex.liquidbounce.utils.ClientUtils.LOGGER
+import net.ccbluex.liquidbounce.utils.ClientUtils.disableFastRender
+import net.ccbluex.liquidbounce.utils.inventory.InventoryUtils
+import net.ccbluex.liquidbounce.utils.render.MiniMapRegister
+import net.ccbluex.liquidbounce.utils.timing.TickedActions
+import net.ccbluex.liquidbounce.utils.timing.WaitTickUtils
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
+
+object LiquidBounce {
+
+    /**
+     * Client Information
+     *
+     * This has all of the basic information.
+     */
+    const val CLIENT_NAME = "Replace"
+    const val CLIENT_AUTHOR = "ChaoYing"
+    const val CLIENT_CLOUD = "https://cloud.liquidbounce.net/LiquidBounce"
+    const val CLIENT_WEBSITE = "liquidbounce.net"
+
+    const val MINECRAFT_VERSION = "1.8.9"
+
+    val clientVersionText = "073024"
+    val clientVersionNumber =
+        clientVersionText.substring(1).toIntOrNull() ?: 0 // version format: "b<VERSION>" on legacy
+
+    /**
+     * Defines if the client is in development mode.
+     * This will enable update checking on commit time instead of regular legacy versioning.
+     */
+    const val IN_DEV = true
+
+    val clientTitle = CLIENT_NAME + " " + clientVersionText + "  | " + " \"" + Symbolconversion(getjitang()) + "\""
+
+    var isStarting = true
+
+    // Managers
+    val moduleManager = ModuleManager
+    val commandManager = CommandManager
+    val eventManager = EventManager
+    val fileManager = FileManager
+    val scriptManager = ScriptManager
+
+    // HUD & ClickGUI
+    val hud = HUD
+
+    val clickGui = ClickGui
+
+    // Menu Background
+    var background: Background? = null
+
+    /**
+     * Execute if client will be started
+     */
+    fun startClient() {
+        isStarting = true
+
+        LOGGER.info("Starting $CLIENT_NAME $clientVersionText , by $CLIENT_AUTHOR")
+
+        runBlocking {
+            runCatching {
+                async {
+                    // Load languages
+                    loadLanguages()
+
+                    // Register listeners
+                    registerListener(RotationUtils)
+                    registerListener(ClientFixes)
+                    registerListener(BungeeCordSpoof)
+                    registerListener(CapeService)
+                    registerListener(InventoryUtils)
+                    registerListener(MiniMapRegister)
+                    registerListener(TickedActions)
+                    registerListener(MovementUtils)
+                    registerListener(PacketUtils)
+                    registerListener(TimerBalanceUtils)
+                    registerListener(BPSUtils)
+                    registerListener(Tower)
+                    registerListener(WaitTickUtils)
+
+                    // Load client fonts
+                    loadFonts()
+
+                    // Load settings
+                    loadSettings(false) {
+                        LOGGER.info("Successfully loaded ${it.size} settings.")
+                    }
+
+                    // Register commands
+                    registerCommands()
+
+                    // Setup module manager and register modules
+                    registerModules()
+
+                    runCatching {
+                        // Remapper
+                        loadSrg()
+
+                        if (!Remapper.mappingsLoaded) {
+                            error("Failed to load SRG mappings.")
+                        }
+
+                        // ScriptManager
+                        loadScripts()
+                        enableScripts()
+                    }.onFailure {
+                        LOGGER.error("Failed to load scripts.", it)
+                    }
+
+                    // Load configs
+                    loadAllConfigs()
+
+                    // Update client window
+                    updateClientWindow()
+
+                    // Tabs (Only for Forge!)
+                    if (hasForge()) {
+                        BlocksTab()
+                        ExploitsTab()
+                        HeadsTab()
+                    }
+
+                    // Disable optifine fastrender
+                    disableFastRender()
+
+                    // Load alt generators
+                    loadActiveGenerators()
+
+                    // Load message of the day
+                    messageOfTheDay?.message?.let { LOGGER.info("Message of the day: $it") }
+
+
+                    // Login into known token if not empty
+                    if (CapeService.knownToken.isNotBlank()) {
+                        runCatching {
+                            CapeService.login(CapeService.knownToken)
+                        }.onFailure {
+                            LOGGER.error("Failed to login into known cape token.", it)
+                        }.onSuccess {
+                            LOGGER.info("Successfully logged in into known cape token.")
+                        }
+                    }
+
+                    // Refresh cape service
+                    CapeService.refreshCapeCarriers {
+                        LOGGER.info("Successfully loaded ${CapeService.capeCarriers.size} cape carriers.")
+                    }
+                }.await() // Wait to load
+
+                // Load background
+                FileManager.loadBackground()
+
+            }.onFailure {
+                LOGGER.error("Failed to start client ${it.message}")
+            }.onSuccess {
+                // Set is starting status
+                isStarting = false
+
+                callEvent(StartupEvent())
+                LOGGER.info("Successfully started client")
+            }
+        }
+    }
+
+    /**
+     * Execute if client will be stopped
+     */
+    fun stopClient() {
+        // Call client shutdown
+        callEvent(ClientShutdownEvent())
+
+        // Save all available configs
+        saveAllConfigs()
+
+    }
+
+    fun getjitang(): String {
+        val client = OkHttpClient()
+        val request = Request.Builder()
+            .url("https://v1.jinrishici.com/rensheng.txt")
+            .build()
+
+        return try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) throw IOException("Unexpected code $response")
+            response.body?.string() ?: "No response body"
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "Error: ${e.message}"
+        }
+    }
+
+    fun Symbolconversion(input: String): String {
+        val replacements = mapOf(
+            '，' to ',',
+            '。' to '.',
+            '？' to '?',
+            '！' to '!',
+            '：' to ':',
+            '；' to ';',
+            '（' to '(',
+            '）' to ')',
+            '【' to '[',
+            '】' to ']',
+            '“' to '"',
+            '”' to '"',
+            '‘' to '\'',
+            '’' to '\''
+        )
+
+        var output = input
+        for ((chinese, english) in replacements) {
+            output = output.replace(chinese, english)
+        }
+
+        return output
+    }
+}
